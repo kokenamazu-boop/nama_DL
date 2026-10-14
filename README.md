@@ -52,6 +52,9 @@ Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自
 - 詳しい使い方：[はじめに.txt](はじめに.txt)
 - 更新履歴：[更新内容.txt](更新内容.txt)
 
+不具合報告、機能追加等の要望は質問箱まで
+https://note.com/qa/namanamanamazun
+
 不具合の報告には、バージョン、対象の動画／リストのURL、表示されたエラー、使用ブラウザーを添えてください。ログに個人の保存先がある場合は、ユーザー名を伏せてください。
 
 ## 保存形式・データの扱い
@@ -74,9 +77,6 @@ Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自
 - [Deno](https://github.com/denoland/deno)
 
 ページ内の新しい配置は模擬ページで検証しています。サイトの表示変更により、ボタンの位置や検出が変わる場合があります。
-
-不具合報告、機能追加等の要望は質問箱まで
-https://note.com/qa/namanamanamazun
 
 ## ライセンス
 
