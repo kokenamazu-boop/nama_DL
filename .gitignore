@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.VideoButton-work/
+cookies*.txt
+*.part
+*.ytdl
+*.working.*
+.env
+.env.*
+.DS_Store
+Thumbs.db
+/bin/
+/python/
+/.ui-verify/
+/upload/
+/.library-helper-*/

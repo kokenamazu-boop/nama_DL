@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "nama_DL",
+  "version": "1.10.0",
+  "description": "開いている動画・音声・サムネイルを保存するダウンローダー",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "nativeMessaging",
+    "cookies"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/nama_DL.png",
+      "32": "icons/nama_DL.png",
+      "48": "icons/nama_DL.png",
+      "128": "icons/nama_DL.png"
+    },
+    "default_title": "nama_DL"
+  },
+  "short_name": "nama_DL",
+  "icons": {
+    "16": "icons/nama_DL.png",
+    "32": "icons/nama_DL.png",
+    "48": "icons/nama_DL.png",
+    "128": "icons/nama_DL.png"
+  },
+  "host_permissions": [
+    "https://*.nicovideo.jp/*",
+    "https://*.youtube.com/*",
+    "https://youtu.be/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.nicovideo.jp/*",
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "page.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>nama_DL</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><h1>nama_DL ダウンロード</h1><button id="close" aria-label="閉じる">×</button></header>
+<main>
+<p id="title" class="context">現在のページを確認中…</p>
+<div class="choices" role="radiogroup" aria-label="保存内容">
+<label class="choice"><input name="media" value="video" type="radio" checked><span><strong>動画を保存</strong><small>MP4 · 最高画質 · After Effects用</small></span></label>
+<label class="choice"><input name="media" value="audio" type="radio"><span><strong>音声のみを保存</strong><small>WAV · 24bit PCM</small></span></label>
+<label class="choice"><input name="media" value="thumbnail" type="radio"><span><strong>サムネイルのみを保存</strong><small>PNG画像</small></span></label>
+</div>
+<p id="scopeNote" class="context" hidden></p>
+<details id="advanced"><summary>詳細設定</summary><div class="checks">
+<label><input id="embedThumbnail" type="checkbox"> サムネイルを埋め込む（動画のみ）</label>
+<label><input id="embedMetadata" type="checkbox"> メタデータを埋め込む</label>
+<label><input id="auth" type="checkbox"> このサイトのログイン情報を使う</label>
+<label><input id="playlist" type="checkbox"> 再生リスト・マイリスト全体を保存</label>
+</div><div class="tools"><button id="inspect">画質を確認</button><button id="folder">保存先を開く</button><button id="resetFolder">標準に戻す</button><button id="pageMenu" hidden>ページのメニューを開く</button></div><small id="modeNote"></small><small id="url"></small></details>
+<div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="settingMessage" class="message"></p>
+<pre id="status">待機中</pre>
+<details class="setup"><summary>初回セットアップ・接続確認</summary><small id="version">拡張機能 1.10.0 / PC側を確認中…</small><small>Setup.cmdに入力する拡張機能ID</small><code id="id"></code><button id="copyId">IDをコピー</button><small id="copyMessage"></small></details>
+</main>
+<footer><button id="cancel" hidden>処理を中止</button><button id="start" class="primary" disabled>ダウンロード</button></footer>
+<script src="popup.js"></script>
+</body></html>
