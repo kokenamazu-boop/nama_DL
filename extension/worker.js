@@ -1,3 +1,4 @@
+importScripts('sites.js');
 let port=null,busy=false,activeDestination='',connection=null;
 function connectionError(reason){return /not found|specified native messaging host/i.test(reason||'')?'初回セットアップが必要です。「初回セットアップ・接続確認」からIDをコピーしてSetup.cmdを実行してください。':'PC側へ接続できません。CheckSetup.cmdを実行し、必要ならApplyUpdate.cmdで更新してください。'+(reason?'\n'+reason:'');}
 function status(text){return chrome.storage.local.set({status:{text,busy}});}
@@ -11,7 +12,7 @@ function connect(){
   port.onMessage.addListener(m=>{
    if(m.type==='hello'){
     chrome.storage.local.set({hostVersion:m.version});
-    if(!settled){settled=true;clearTimeout(timer);if(m.version==='1.10.0')resolve(port);else fail();}
+    if(!settled){settled=true;clearTimeout(timer);if(m.version==='1.11.0')resolve(port);else fail();}
     return;
    }
    if(m.type==='folderSelected'){
@@ -36,13 +37,16 @@ chrome.runtime.onMessage.addListener((m,s,reply)=>{
  if(s.id!==chrome.runtime.id)return;
  if(s.tab){
   let page;try{page=new URL(s.tab.url||s.url);}catch{reply({error:'動画ページを確認できません'});return;}
-  if(!['www.nicovideo.jp','www.youtube.com'].includes(page.hostname)){reply({error:'このページから操作できません'});return;}
+  if(page.protocol!=='https:'||(!['www.nicovideo.jp','www.youtube.com'].includes(page.hostname)&&!namaDLSites.isXHost(page.hostname))){reply({error:'このページから操作できません'});return;}
   if(['download','inspect'].includes(m.action)){
    let target;try{target=new URL(m.url);}catch{reply({error:'URLが不正です'});return;}
    const sameOrigin=target.origin===page.origin;
    const playlist=sameOrigin&&(target.hostname==='www.nicovideo.jp'?(/^\/(?:user\/\d+\/|my\/)?mylist\/\d+\/?$/.test(target.pathname)||(/^\/(?:my\/)?mylist\/?$/.test(target.pathname)&&/^#\/\d+(?:[/?]|$)/.test(target.hash))):target.pathname==='/playlist'&&/^[\w-]+$/.test(target.searchParams.get('list')||''));
    const cardVideo=sameOrigin&&m.source==='card'&&!target.username&&!target.password&&(target.hostname==='www.nicovideo.jp'?/^\/watch\/(?:sm|nm|so)?\d+\/?$/.test(target.pathname):target.pathname==='/watch'&&/^[\w-]{11}$/.test(target.searchParams.get('v')||''));
-   if(m.url!==page.href&&!playlist&&!cardVideo){reply({error:'動画が切り替わりました。メニューを開き直してください'});return;}
+   const post=namaDLSites.isXHost(page.hostname)&&namaDLSites.xPostURL(target.href);
+   if(namaDLSites.isXHost(page.hostname)&&!post){reply({error:'動画付き投稿のダウンロードボタンを押してください'});return;}
+   if(m.url!==page.href&&!playlist&&!cardVideo&&!(post&&(m.source==='post'||post===namaDLSites.xPostURL(page.href)))){reply({error:'動画が切り替わりました。メニューを開き直してください'});return;}
+   if(post)m={...m,url:post,playlist:false};
    if(cardVideo)m={...m,url:target.origin+(target.hostname==='www.nicovideo.jp'?target.pathname.replace(/\/$/,''):'/watch?v='+encodeURIComponent(target.searchParams.get('v'))),playlist:false};
 
   }
@@ -58,12 +62,13 @@ chrome.runtime.onMessage.addListener((m,s,reply)=>{
      const settings=await chrome.storage.local.get(['destination','authSites']);activeDestination=settings.destination||'';
      if(s.tab){
       const page=new URL(m.url),nico=page.hostname==='www.nicovideo.jp';
-      const authKey=nico?'nicovideo.jp':page.origin;
+      const x=namaDLSites.isXHost(page.hostname);
+      const authKey=nico?'nicovideo.jp':namaDLSites.authKey(page.href);
       const useAuth=settings.authSites?.[authKey]??nico;
       let cookies=[];
       if(useAuth){
        const stores=await chrome.cookies.getAllCookieStores();const store=stores.find(x=>x.tabIds.includes(s.tab.id));
-       cookies=await chrome.cookies.getAll({domain:nico?'nicovideo.jp':'youtube.com',...(store?{storeId:store.id}:{})});
+       cookies=await chrome.cookies.getAll({domain:nico?'nicovideo.jp':x?'x.com':'youtube.com',...(store?{storeId:store.id}:{})});
        if(nico&&!cookies.some(c=>c.name==='user_session'&&c.value)&&m.options?.media!=='thumbnail')throw Error('ニコニコへログインし直してください。ログインCookieが見つかりません。');
       }
       m={action:m.action,url:m.url,cookies,options:m.options,playlist:!!m.playlist};

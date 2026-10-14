@@ -67,6 +67,8 @@ def command(url,cookie=None,playlist=False,destination=None,options=None):
     if o['media']!='thumbnail':args+=['--print','after_move:VBRESULT:%(.{filepath,'+fields+'})j']
     if o['embedThumbnail']:args+=['--write-thumbnail']
     if playlist:args+=['--yes-playlist','--no-abort-on-error']
+    # X may return several videos in one post. Keep them all, without treating a profile as a playlist.
+    elif urlsplit(url).hostname in ('x.com','www.x.com','twitter.com','www.twitter.com'):args+=['--no-playlist','--no-abort-on-error']
     else:args+=['--no-playlist','--playlist-items','1']
     if cookie:args+=['--cookies',str(cookie)]
     return args+['--',url]
@@ -335,7 +337,8 @@ def inspect_quality(m):
             info=records[0]
             if info.get('entries'):info=next((x for x in info['entries'] if x),{})
             has_session=any(c.get('name')=='user_session' and c.get('value') for c in m.get('cookies',[]))
-            result=('done','画質確認結果\nyt-dlp: '+(version[0] if version else '不明')+'\nニコニコのログインCookie: '+('あり（有効性・会員種別は未確認）' if has_session else 'なし')+'\n'+quality_summary(info))
+            login_note='\nニコニコのログインCookie: '+('あり（有効性・会員種別は未確認）' if has_session else 'なし') if u.hostname=='nicovideo.jp' or u.hostname.endswith('.nicovideo.jp') else ''
+            result=('done','画質確認結果\nyt-dlp: '+(version[0] if version else '不明')+login_note+'\n'+quality_summary(info))
     except InterruptedError:result=('cancelled','画質確認を中止しました')
     except Exception as e:result=('error',str(e))
     send(*result)
@@ -459,7 +462,7 @@ def main():
             size=struct.unpack('<I',read_exact(4))[0]
             if size>2*1024*1024:break
             m=json.loads(read_exact(size))
-            if m.get('action')=='hello':send('hello','',version='1.10.0')
+            if m.get('action')=='hello':send('hello','',version='1.11.0')
             elif m.get('action')=='chooseFolder':
                 if picker and picker.is_alive():send('folderNotice','フォルダー選択画面はすでに開いています。')
                 else:

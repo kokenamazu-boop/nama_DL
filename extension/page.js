@@ -3,13 +3,16 @@
  globalThis.__namaDLPage = true;
  const icon='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>';
  const isNico=location.hostname==='www.nicovideo.jp';
- const authKey=isNico?'nicovideo.jp':location.origin;
+ const isX=namaDLSites.isXHost(location.hostname);
+ const authKey=isNico?'nicovideo.jp':namaDLSites.authKey(location.href);
+ const posts=new Map();
  const cards=new Map();let activeContext=null;
  let buttonHost=null,buttonRoot=null,layer=null,root=null,lastUrl=location.href,returnFocus=null,scheduled=false;
  const $=id=>root?.getElementById(id);
- function watchPage(){return isNico?/^\/watch\//.test(location.pathname):(location.pathname==='/watch'&&new URLSearchParams(location.search).has('v'));}
+ function watchPage(){return isX?!!namaDLSites.xPostURL(location.href):isNico?/^\/watch\//.test(location.pathname):(location.pathname==='/watch'&&new URLSearchParams(location.search).has('v'));}
 
  function playlistTarget(value){
+  if(isX)return null;
   try{
    const u=new URL(value,location.href);
    if(u.origin!==location.origin)return null;
@@ -34,7 +37,46 @@
   }catch{}
   return null;
  }
- function pageContext(){return {url:playlistPage()?playlistTarget(location.href):location.href,playlist:playlistPage(),label:(isNico&&playlistPage()?document.querySelector('.MylistHeader-name')?.textContent:null)||document.title.replace(/\s*[-–]\s*(YouTube|ニコニコ動画).*$/,'')};}
+ function pageContext(){return {url:isX?namaDLSites.xPostURL(location.href):playlistPage()?playlistTarget(location.href):location.href,playlist:playlistPage(),label:(isNico&&playlistPage()?document.querySelector('.MylistHeader-name')?.textContent:null)||document.title.replace(/\s*[-–]\s*(YouTube|ニコニコ動画).*$/,'')};}
+ function postContext(article){
+  if(!article.isConnected)return null;
+  // Prefer the timestamp permalink; a quoted post or a link in the text is not the action row's target.
+  const own=node=>node.closest('article[data-testid="tweet"]')===article&&!node.closest('[data-testid="quoteTweet"],[data-testid="card.wrapper"],div[role="link"]');
+  const links=[...article.querySelectorAll('a[href]')].filter(own);
+  const permalink=links.find(a=>a.querySelector('time')&&namaDLSites.xPostURL(a.href))||links.find(a=>a.closest('[data-testid="User-Name"]')&&namaDLSites.xPostURL(a.href));
+  const url=permalink&&namaDLSites.xPostURL(permalink.href);
+  if(!url)return null;
+  const text=[...article.querySelectorAll('[data-testid="tweetText"]')].find(own)?.textContent;
+  return {url,playlist:false,source:'post',label:text?.trim()||'Xの動画付き投稿'};
+ }
+ function postSlot(article){
+  const media=[...article.querySelectorAll('video,[data-testid="videoPlayer"],[data-testid="videoComponent"]')].some(v=>v.closest('article[data-testid="tweet"]')===article);
+  if(!media)return null;
+  for(const group of article.querySelectorAll('[role="group"]')){
+   if(group.closest('article[data-testid="tweet"]')!==article)continue;
+   const share=[...group.querySelectorAll('button,[role="button"]')].find(b=>!b.closest('[data-nama-dl]')&&b.closest('[role="group"]')===group&&(/share|共有|シェア/i.test((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||''))||b.getAttribute('data-testid')==='share'));
+   if(!share)continue;
+   let anchor=share;
+   while(anchor.parentElement&&anchor.parentElement!==group)anchor=anchor.parentElement;
+   return {controls:group,before:anchor.nextSibling,share};
+  }
+  return null;
+ }
+ function syncPosts(){
+  const seen=new Set();
+  for(const article of document.querySelectorAll('article[data-testid="tweet"]')){
+   const context=postContext(article),target=context&&postSlot(article);if(!target)continue;
+   seen.add(article);let item=posts.get(article);
+   if(!item){item=createButton(()=>postSlot(article)&&postContext(article));posts.set(article,item);}
+   if(item.host.parentElement!==target.controls||target.before!==item.host)target.controls.insertBefore(item.host,target.before);
+   const color=getComputedStyle(target.share).color;
+   const css='color:'+color+';--nama-hover:rgba(29,155,240,.15);width:36px;height:36px;flex:0 0 36px;';
+   if(item.host.getAttribute('style')!==css)item.host.setAttribute('style',css);
+   const button=item.shadow.querySelector('button'),label='この投稿の動画をダウンロード: '+context.label;
+   if(button.title!==label){button.title=label;button.setAttribute('aria-label',label);}
+  }
+  for(const [article,item] of posts)if(!seen.has(article)){item.host.remove();posts.delete(article);}
+ }
  function menuButton(container,anchor=null){
   return [...container.querySelectorAll('button,[role="button"]')].find(b=>{const r=b.getBoundingClientRect(),a=anchor?.getBoundingClientRect();return !b.closest('[data-nama-dl]')&&r.width>0&&r.height>0&&(!a||(r.top>a.top-40&&r.top<a.bottom+60))&&/その他|メニュー|more|menu/i.test((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||''));});
  }
@@ -193,6 +235,7 @@
  function ensureButton(){
   scheduled=false;
   if(lastUrl!==location.href){lastUrl=location.href;closeMenu();}
+  if(isX){syncPosts();buttonHost?.remove();return;}
   syncCards();
   if(!watchPage()&&!playlistPage()){buttonHost?.remove();return;}
   const target=playlistPage()?listSlot():slot();if(!target){buttonHost?.remove();return;}
@@ -266,9 +309,10 @@
   <div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="folderMessage"></p><pre id="status">待機中</pre>
   </main><footer><button id="cancel" class="minor" hidden>処理を中止</button><button id="start" class="primary">ダウンロード</button></footer></section></div>`;
   (document.fullscreenElement||document.body).append(layer);
-  $('context').textContent=(activeContext.playlist?'リスト全体: ':activeContext.source==='card'?'動画: ':'')+(activeContext.label||'現在の動画');
+  $('context').textContent=(activeContext.playlist?'リスト全体: ':activeContext.source==='post'?'投稿: ':activeContext.source==='card'?'動画: ':'')+(activeContext.label||'現在の動画');
   $('context').title=$('context').textContent;
   $('playlist').checked=!!activeContext.playlist;$('playlist').disabled=!!activeContext.playlist||activeContext.source==='card';
+  if(isX){$('playlist').checked=false;$('playlist').disabled=true;$('playlist').closest('label').hidden=true;}
   $('close').onclick=closeMenu;
   root.querySelector('.backdrop').addEventListener('click',e=>{if(e.target.classList.contains('backdrop'))closeMenu();});
   layer.addEventListener('keydown',e=>{
@@ -299,7 +343,7 @@
  document.addEventListener('yt-navigate-finish',schedule);
  window.addEventListener('hashchange',schedule);
  window.addEventListener('resize',schedule);window.addEventListener('scroll',schedule,true);
- new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['href','aria-label','title']});
+ new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['href','aria-label','title','data-testid']});
  new MutationObserver(schedule).observe(document.documentElement,{attributes:true,attributeFilter:['dark','class','style','data-theme']});
  setInterval(schedule,1500);schedule();
 })();
