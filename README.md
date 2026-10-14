@@ -1,6 +1,6 @@
 # nama_DL
 
-![nama_DL](extension/icons/nama_DL.png)
+<img src="extension/icons/nama_DL.png" alt="nama_DL" width="128">
 
 YouTube・ニコニコ動画の一覧やプレイヤーから、動画・音声・サムネイルを保存するWindows向けブラウザー拡張機能です。
 
