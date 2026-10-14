@@ -75,6 +75,9 @@ Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自
 
 ページ内の新しい配置は模擬ページで検証しています。サイトの表示変更により、ボタンの位置や検出が変わる場合があります。
 
+不具合報告、機能追加等の要望は質問箱まで
+https://note.com/qa/namanamanamazun
+
 ## ライセンス
 
 - 本リポジトリのソースコードは [MIT License](LICENSE) の下で提供されます。
