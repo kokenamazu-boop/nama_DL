@@ -1,4 +1,4 @@
-import json, os, struct, subprocess, sys, threading, tempfile
+import json, math, os, re, struct, subprocess, sys, threading, tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 ROOT=Path(__file__).resolve().parent
@@ -52,7 +52,103 @@ def destination_path(value=''):
 def options_for(value=None):
     value=value if isinstance(value,dict) else {}
     media=value.get('media') if value.get('media') in ('audio','thumbnail') else 'video'
-    return {'media':media,'embedThumbnail':media=='video' and bool(value.get('embedThumbnail')),'embedMetadata':media!='thumbnail' and bool(value.get('embedMetadata'))}
+    clip=media!='thumbnail' and value.get('clipEnabled') is True
+    normalize=media!='thumbnail' and value.get('normalizeEnabled') is True
+    start=parse_time(value.get('clipStart',0)) if clip else 0.0
+    end=parse_time(value.get('clipEnd'),optional=True) if clip else None
+    if clip and end is not None and end<=start:raise ValueError('終了時刻は開始時刻より後にしてください')
+    target=-15.0
+    if normalize:
+        try:target=float(value.get('targetLUFS',-15))
+        except (ValueError,TypeError):raise ValueError('目標LUFSは-40〜-5の数値で指定してください')
+        if not math.isfinite(target) or not -40<=target<=-5:raise ValueError('目標LUFSは-40〜-5の数値で指定してください')
+    return {'media':media,'embedThumbnail':media=='video' and bool(value.get('embedThumbnail')),'embedMetadata':media!='thumbnail' and bool(value.get('embedMetadata')),'clipEnabled':clip,'clipStart':start,'clipEnd':end,'normalizeEnabled':normalize,'targetLUFS':target}
+
+def parse_time(value,optional=False):
+    if value is None or value=='':
+        if optional:return None
+        return 0.0
+    if isinstance(value,bool):raise ValueError('時刻は秒数、分:秒、時:分:秒で指定してください')
+    text=str(value).strip()
+    if len(text)>24 or not re.fullmatch(r'\d+(?::\d+){0,2}(?:\.\d{1,3})?',text):raise ValueError('時刻は秒数、分:秒、時:分:秒（小数3桁まで）で指定してください')
+    parts=[float(part) for part in text.split(':')]
+    if any(part>=60 for part in parts[1:]):raise ValueError('時刻の分・秒は0〜59で指定してください')
+    result=0.0
+    for part in parts:result=result*60+part
+    if not math.isfinite(result) or result>3599999:raise ValueError('指定時刻が大きすぎます')
+    return result
+
+def processing_window(data,options):
+    if not options['clipEnabled']:return None
+    duration=float(data.get('format',{}).get('duration') or 0)
+    if not math.isfinite(duration) or duration<=0:raise ValueError('動画・音声の長さを確認できないため切り出せません')
+    start=options['clipStart'];end=min(options['clipEnd'] if options['clipEnd'] is not None else duration,duration)
+    if start>=end:raise ValueError('開始時刻が動画・音声の末尾以降です。時刻を確認してください')
+    return {'start':start,'end':end,'duration':end-start}
+
+def media_input(path,window=None):
+    # Transcoding with accurate_seek discards frames/samples before the requested time.
+    return (['-ss',f"{window['start']:.3f}"] if window and window['start'] else [])+['-i',str(path)]
+
+def window_output(window):
+    return ['-t',f"{window['duration']:.3f}"] if window else []
+
+def measure_loudness(source,window=None,sample_rate=None):
+    # loudnorm is used ONLY as a meter. The rendered audio uses volume=fixed gain.
+    filters=(f'aresample={sample_rate},' if sample_rate else '')+'loudnorm=I=-15:TP=-1:LRA=50:print_format=json'
+    args=[str(ROOT/'bin'/'ffmpeg.exe'),'-hide_banner','-nostdin']+media_input(source,window)+window_output(window)+['-map','0:a:0','-vn','-sn','-dn','-af',filters,'-f','null','-']
+    logs=[]
+    def line(text):
+        logs.append(text)
+        if len(logs)>45:logs.pop(0)
+    code=run_process(args,line)
+    text='\n'.join(logs)
+    if code:raise RuntimeError('LUFSの測定に失敗しました。元ファイルは残します。\n'+text[-2000:])
+    match=re.search(r'\{\s*"input_i".*?\}',text,re.S)
+    if not match:raise RuntimeError('LUFSの測定結果を取得できませんでした。元ファイルは残します。')
+    result=json.loads(match.group())
+    return {'i':float(result['input_i']),'tp':float(result['input_tp'])}
+
+def normalization_plan(source,window,options,progress,sample_rate=None):
+    if not options['normalizeEnabled']:return None
+    progress('音量を解析中…（曲中の強弱を変えず、全体に同じゲインを適用します）')
+    measured=measure_loudness(source,window,sample_rate)
+    valid=math.isfinite(measured['i']) and math.isfinite(measured['tp'])
+    requested=options['targetLUFS']-measured['i'] if valid else 0.0
+    gain=min(requested,-1.0-measured['tp']) if valid else 0.0
+    return {'input':measured,'target':options['targetLUFS'],'gain':gain,'valid':valid,'limited':valid and gain<requested-.01}
+
+def gain_filter(plan):
+    return f"volume={plan['gain']:.6f}dB:precision=double"
+
+def render_with_gain(args,temp,on_line,plan=None):
+    if not plan or not plan['valid']:return run_process(args,on_line)
+    # Verify the encoded output as AAC encoding can introduce new true peaks.
+    # A retry re-renders from the ORIGINAL input with less fixed gain, never a limiter.
+    for attempt in range(3):
+        command=list(args);command[command.index('-af')+1]=gain_filter(plan)
+        code=run_process(command,on_line)
+        if code:return code
+        measured=measure_loudness(temp);plan['output']=measured
+        if not math.isfinite(measured['i']) or not math.isfinite(measured['tp']):raise RuntimeError('保存後の音量を確認できませんでした。元ファイルは残します。')
+        peak_excess=measured['tp']+1.0
+        loudness_excess=measured['i']-plan['target']
+        if peak_excess<=.01 and loudness_excess<=.15:return 0
+        if attempt==2:raise RuntimeError('固定ゲインでの音量確認に失敗しました。元ファイルは残します。')
+        correction=max(peak_excess+.05 if peak_excess>.01 else 0,loudness_excess if loudness_excess>.15 else 0)
+        plan['gain']-=correction;plan['limited']=True
+        temp.unlink(missing_ok=True)
+    raise RuntimeError('音量の確認に失敗しました')
+
+def processing_summary(window,plan):
+    parts=[]
+    if window:parts.append(f"切り出し: {window['start']:.3f}〜{window['end']:.3f}秒（{window['duration']:.3f}秒）")
+    if plan:
+        if not plan['valid']:parts.append('LUFS: 無音・短い音声等で測定できないため音量変更なし')
+        else:
+            after=plan['output'];parts.append(f"LUFS: {plan['input']['i']:.2f} → {after['i']:.2f} / 目標 {plan['target']:.2f} / 固定ゲイン {plan['gain']:+.2f} dB / True Peak {after['tp']:.2f} dBTP")
+            if plan['limited'] and after['i']<plan['target']-.15:parts.append('ピーク上限を優先したため目標LUFS未達（強弱は維持・リミッターなし）')
+    return '\n'.join(parts)
 
 def command(url,cookie=None,playlist=False,destination=None,options=None):
     o=options_for(options)
@@ -103,6 +199,7 @@ def run_process(args, on_line):
         if cancel.is_set():raise InterruptedError('中止しました')
         return code
     finally:
+        current.stdout.close()
         with job_lock:proc=None
 
 def probe(path):
@@ -216,16 +313,18 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
     data=source_info if source_info is not None else probe(source)
     video=next((x for x in data['streams'] if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic')),None)
     if not video:raise ValueError('映像トラックがありません: '+source.name)
+    window=processing_window(data,o)
     vf='pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p'
     if video.get('color_transfer') in ('smpte2084','arib-std-b67'):
         vf='zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,'+vf
         progress('HDR → SDR に色変換: '+source.name)
     progress('高速保存の可否を確認中: '+source.name)
-    copy_video=can_copy_video(source,video)
+    copy_video=False if window else can_copy_video(source,video)
     if audio_source:
         audio_info=audio_info if audio_info is not None else probe(audio_source)
     audio=next((x for x in (audio_info if audio_source else data).get('streams',[]) if x.get('codec_type')=='audio'),None)
-    copy_audio=can_copy_audio(audio)
+    normalization=normalization_plan(audio_source or source,window,o,progress,48000) if audio else None
+    copy_audio=can_copy_audio(audio) and not window and not normalization
     # Unique temporary name; never replace the source or an existing completed output.
     import uuid
     temp=target/(uuid.uuid4().hex+'.working.mp4')
@@ -238,9 +337,10 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
         modes=[(copy_video,copy_audio)]
         if copy_video or copy_audio:modes.append((False,False))
         for attempt,(copy_video,copy_audio) in enumerate(modes):
-            args=[str(ROOT/'bin'/'ffmpeg.exe'),'-hide_banner','-nostdin','-n','-i',str(source)]
-            if audio_source:args+=['-i',str(audio_source)]
+            args=[str(ROOT/'bin'/'ffmpeg.exe'),'-hide_banner','-nostdin','-n']+media_input(source,window)
+            if audio_source:args+=media_input(audio_source,window)
             if o['embedThumbnail']:args+=['-i',str(thumb)]
+            args+=window_output(window)
             args+=['-map','0:'+str(video['index']),'-map',('1:a:0' if audio_source else '0:a:0?')]
             if o['embedThumbnail']:args+=['-map',('2:v:0' if audio_source else '1:v:0')]
             args+=['-map_metadata','-1','-sn','-dn']
@@ -248,13 +348,14 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
             else:args+=['-filter:v:0',vf,'-c:v:0','libx264','-preset:v:0','fast','-crf:v:0','16','-pix_fmt:v:0','yuv420p','-fps_mode:v:0','cfr']
             if copy_audio:args+=['-c:a','copy']
             else:args+=['-c:a','aac','-b:a','320k','-ar','48000']
+            if normalization and normalization['valid']:args+=['-af',gain_filter(normalization)]
             if o['embedThumbnail']:args+=['-c:v:1','copy','-disposition:v:1','attached_pic']
             for key,value in metadata.items():args+=['-metadata',key+'='+value]
             args+=['-movflags','+faststart','-progress','pipe:1','-nostats',str(temp)]
             progress(('映像は再圧縮なしでMP4へ保存' if copy_video else '映像をH.264へ高品質変換')+(' / 音声は再圧縮なし' if copy_audio else '')+'\n'+source.name)
             errors.clear()
             try:
-                code=run_process(args,line)
+                code=render_with_gain(args,temp,line,normalization)
                 if code or not temp.exists() or temp.stat().st_size==0:raise RuntimeError('MP4変換失敗: '+source.name+'\n'+'\n'.join(errors))
                 checked=probe(temp)
                 result_video=next((x for x in checked.get('streams',[]) if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic')),None)
@@ -263,9 +364,10 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
                 if (audio_source or audio) and not any(x.get('codec_type')=='audio' and x.get('codec_name')=='aac' for x in checked['streams']):raise RuntimeError('MP4の音声確認に失敗しました。MKVは残します。')
                 if o['embedThumbnail'] and not any(x.get('disposition',{}).get('attached_pic') for x in checked['streams']):raise RuntimeError('サムネイル埋め込みの確認に失敗しました。元MKVは残します。')
                 if metadata.get('title') and checked.get('format',{}).get('tags',{}).get('title')!=metadata['title']:raise RuntimeError('メタデータ埋め込みの確認に失敗しました。元MKVは残します。')
-                before=float(data.get('format',{}).get('duration') or 0)
+                before=window['duration'] if window else float(data.get('format',{}).get('duration') or 0)
                 after=float(checked.get('format',{}).get('duration') or 0)
-                if after<=0 or (before>0 and abs(before-after)>max(1.0,before*0.01)):raise RuntimeError('MP4の長さが元動画と一致しません。MKVは残します。')
+                tolerance=.15 if window else max(1.0,before*0.01)
+                if after<=0 or (before>0 and abs(before-after)>tolerance):raise RuntimeError('MP4の長さが保存範囲と一致しません。元動画は残します。')
                 break
             except InterruptedError:raise
             except Exception:
@@ -275,7 +377,10 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
         if output.exists():raise RuntimeError('同名MP4が作成されたため上書きを中止しました')
         if cancel.is_set():raise InterruptedError('中止しました')
         temp.rename(output)
-        if verified is not None:verified.update(checked,save_mode='映像・音声は再圧縮なし' if copy_video and copy_audio else '映像は再圧縮なし' if copy_video else 'H.264へ高品質変換')
+        details=processing_summary(window,normalization)
+        if o['normalizeEnabled'] and not audio:details+=('\n' if details else '')+'音声トラックがないため音量調整なし'
+        if details:progress(details)
+        if verified is not None:verified.update(checked,save_mode='映像・音声は再圧縮なし' if copy_video and copy_audio else '映像は再圧縮なし' if copy_video else 'H.264へ高品質変換',processing=details)
         if source.suffix.lower()=='.mkv':
             if cancel.is_set():raise InterruptedError('中止しました。MKVは残します。')
             current=source.stat()
@@ -285,20 +390,27 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
         return output
     finally:temp.unlink(missing_ok=True)
 
-def convert_audio(source,target,record,options):
+def convert_audio(source,target,record,options,verified=None):
     import uuid
+    options=options_for(options)
+    window=processing_window(probe(source),options) if options['clipEnabled'] else None
+    normalization=normalization_plan(source,window,options,lambda text:send('progress',text))
     output=unique_path(target/(title_name(record.get('title') or source.stem,target)+'.wav'))
     temp=target/(uuid.uuid4().hex+'.working.wav')
-    args=[str(ROOT/'bin'/'ffmpeg.exe'),'-v','error','-nostdin','-n','-i',str(source),'-map','0:a:0','-vn','-c:a','pcm_s24le','-rf64','auto','-map_metadata','-1']
+    args=[str(ROOT/'bin'/'ffmpeg.exe'),'-v','error','-nostdin','-n']+media_input(source,window)+window_output(window)+['-map','0:a:0','-vn','-c:a','pcm_s24le','-rf64','auto','-map_metadata','-1']
+    if normalization and normalization['valid']:args+=['-af',gain_filter(normalization)]
     if options['embedMetadata']:
         for k,v in tag_values(record).items():args+=['-metadata',k+'='+v]
     args+=[str(temp)];logs=[]
     try:
-        code=run_process(args,logs.append)
+        code=render_with_gain(args,temp,logs.append,normalization)
         if code:raise RuntimeError('WAV変換失敗: '+'\n'.join(logs[-10:]))
         checked=probe(temp)
         if not any(x.get('codec_name')=='pcm_s24le' for x in checked['streams']):raise RuntimeError('WAVの確認に失敗しました')
+        if window and abs(float(checked.get('format',{}).get('duration') or 0)-window['duration'])>.005:raise RuntimeError('WAVの長さが指定区間と一致しません。元音声は残します。')
         if cancel.is_set():raise InterruptedError('中止しました')
+        if output.exists():raise RuntimeError('同名WAVが作成されたため上書きを中止しました')
+        if verified is not None:verified.update(checked,processing=processing_summary(window,normalization))
         temp.rename(output);return output
     finally:temp.unlink(missing_ok=True)
 
@@ -380,7 +492,7 @@ def download(m):
             if len(files)<len(item_meta):download_errors.append(f'サムネイルを取得できない項目があります（対象 {len(item_meta)} / 画像取得 {len(files)}）')
         groups={}
         for file in files:groups.setdefault(str(Path(file).parent),[]).append(file)
-        converted=0;failed=[];deleted=0;quality_results=[]
+        converted=0;failed=[];deleted=0;quality_results=[];processing_results=[]
         for i,(directory,group) in enumerate(groups.items(),1):
             if cancel.is_set():raise InterruptedError('中止しました')
             source=Path(group[0]).resolve()
@@ -390,6 +502,7 @@ def download(m):
             prefix=f'保存処理 {i}/{len(groups)}\n'
             info=item_meta.get(source.parent.name) or records.get(group[0]) or {'title':source.stem,'id':source.parent.name}
             try:
+                checked={}
                 if o['media']=='thumbnail':
                     png=png_image(source);output=unique_path(target/(title_name(info.get('title') or source.stem,target)+'.png'))
                     checked=probe(png)
@@ -400,7 +513,7 @@ def download(m):
                     if o['media']=='audio':
                         source=next((path for path,data in inputs if any(x.get('codec_type')=='audio' for x in data['streams'])),None)
                         if source is None:raise RuntimeError('音声トラックを取得できませんでした')
-                        output=convert_audio(source,target,info,o)
+                        output=convert_audio(source,target,info,o,verified=checked)
                     else:
                         videos=[(path,data) for path,data in inputs if any(x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic') for x in data['streams'])]
                         if not videos:raise RuntimeError('映像トラックを取得できませんでした')
@@ -410,10 +523,10 @@ def download(m):
                         v=next(x for x in data['streams'] if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic'))
                         info={**info,'width':v.get('width'),'height':v.get('height'),'format_id':'+'.join(str(records.get(file,{}).get('format_id') or Path(file).stem) for file in group)}
                         send('progress',prefix+quality_summary(info))
-                        checked={}
                         output=convert_file(source,lambda t:send('progress',prefix+t),target,o,info,audio,source_info=data,audio_info=audio_pair[1] if audio_pair else None,verified=checked)
                         video=next((x for x in checked['streams'] if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic')),{})
                         quality_results.append(str(info.get('id'))+': 取得 '+str(info.get('width'))+'×'+str(info.get('height'))+' → MP4 '+str(video.get('width'))+'×'+str(video.get('height'))+' / '+checked['save_mode'])
+                if checked.get('processing'):processing_results.append(str(info.get('title') or info.get('id'))+'\n'+checked['processing'])
                 converted+=1
                 deleted+=sum(1 for file in group if Path(file).suffix.lower()=='.mkv' and not Path(file).exists())
                 # Delete only intermediates in this isolated task directory after verifying the final file.
@@ -425,6 +538,7 @@ def download(m):
             except Exception as e:failed.append('処理: '+o['media']+' / '+str(info.get('title') or source.name)+'\n'+str(e))
         text=f"{'PNG' if o['media']=='thumbnail' else 'WAV' if o['media']=='audio' else 'MP4'}保存: {converted} 件 / 取得ファイル: {len(files)} 件\nMKV削除: {deleted} 件\n保存先: {destination}"
         if quality_results:text+='\n画質確認:\n'+'\n'.join(quality_results[-10:])
+        if processing_results:text+='\n切り出し・音量調整:\n'+'\n'.join(processing_results[-10:])
         if failed or download_errors or code not in (0,101):
             result=('error','一部または全部の処理に失敗しました。\n'+text+'\n'+'\n'.join((download_errors+failed+tail)[-12:])+'\n途中ファイル: '+str(stage))
         elif not files:result=('error','取得ファイルがありません。URLを確認してください。\n'+'\n'.join(tail))
@@ -462,7 +576,7 @@ def main():
             size=struct.unpack('<I',read_exact(4))[0]
             if size>2*1024*1024:break
             m=json.loads(read_exact(size))
-            if m.get('action')=='hello':send('hello','',version='1.11.0')
+            if m.get('action')=='hello':send('hello','',version='1.12.0')
             elif m.get('action')=='chooseFolder':
                 if picker and picker.is_alive():send('folderNotice','フォルダー選択画面はすでに開いています。')
                 else:

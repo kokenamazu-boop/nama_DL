@@ -264,9 +264,10 @@
    $('cancel').hidden=!data.status?.busy;
   }catch{if(root)$('status').textContent='拡張機能を更新した場合は、この動画ページを再読み込みしてください。';}
  }
- function selectedOptions(){return {media:root.querySelector('input[name="media"]:checked').value,embedThumbnail:$('embedThumbnail').checked,embedMetadata:$('embedMetadata').checked};}
+ function selectedOptions(validate=false){return {media:root.querySelector('input[name="media"]:checked').value,embedThumbnail:$('embedThumbnail').checked,embedMetadata:$('embedMetadata').checked,...namaDLEdits.read(root,activeContext.url,validate)};}
  function modeUI(){
   const o=selectedOptions();
+  namaDLEdits.update(root,o.media);
   $('embedThumbnail').disabled=o.media!=='video';$('embedMetadata').disabled=o.media==='thumbnail';
   for(const card of root.querySelectorAll('.choice'))card.classList.toggle('selected',card.querySelector('input').checked);
  }
@@ -275,7 +276,7 @@
   if(event&&!event.isTrusted)return;
   try{
    $('status').textContent=action==='chooseFolder'?'フォルダー選択画面を開いています…':'処理を準備中…';
-   const response=await chrome.runtime.sendMessage({action,url:activeContext.url,source:activeContext.source,playlist:action==='inspect'?false:(activeContext.playlist||$('playlist').checked),options:selectedOptions()});
+   const response=await chrome.runtime.sendMessage({action,url:activeContext.url,source:activeContext.source,playlist:action==='inspect'?false:(activeContext.playlist||$('playlist').checked),options:selectedOptions(action==='download')});
    if(response?.error)throw Error(response.error);
   }catch(e){if(root)$('status').textContent=e.message;}
  }
@@ -300,7 +301,7 @@
    <label class="choice"><input name="media" value="video" type="radio" checked><span><strong>動画を保存</strong><small>MP4 · 最高画質 · After Effects用</small></span></label>
    <label class="choice"><input name="media" value="audio" type="radio"><span><strong>音声のみを保存</strong><small>WAV · 24bit PCM</small></span></label>
    <label class="choice"><input name="media" value="thumbnail" type="radio"><span><strong>サムネイルのみを保存</strong><small>PNG画像</small></span></label>
-  </div><details><summary>詳細設定</summary><div class="checks">
+  </div><div id="editOptions"></div><details><summary>詳細設定</summary><div class="checks">
    <label><input type="checkbox" id="embedThumbnail"> サムネイルを埋め込む（動画のみ）</label>
    <label><input type="checkbox" id="embedMetadata"> メタデータを埋め込む</label>
    <label><input type="checkbox" id="auth"> このサイトのログイン情報を使う</label>
@@ -333,12 +334,21 @@
    const data=await chrome.storage.local.get(['options','authSites']);if(!root)return;
    const o=data.options||{},media=['audio','thumbnail'].includes(o.media)?o.media:'video';
    root.querySelector('input[value="'+media+'"]').checked=true;
+   namaDLEdits.mount(root,o,activeContext.url,saveOptions,()=>playbackTime(activeContext.url));
    $('embedThumbnail').checked=!!o.embedThumbnail;$('embedMetadata').checked=!!o.embedMetadata;$('auth').checked=data.authSites?.[authKey]??isNico;
    modeUI();await settingsChanged();$('start')?.focus();
   }catch(e){if(root)$('status').textContent=e.message;}
  }
  chrome.storage.onChanged.addListener(settingsChanged);
- chrome.runtime.onMessage.addListener((m,s,reply)=>{if(m.action==='openNamaMenu'){if(!watchPage()&&!playlistPage()){reply({error:'動画またはリストの個別ページを開いてください'});return;}openMenu().then(()=>reply({ok:true}));return true;}});
+ function playbackTime(url){
+  if(isX){const article=[...document.querySelectorAll('article[data-testid="tweet"]')].find(a=>postContext(a)?.url===namaDLSites.xPostURL(url));const media=article?[...article.querySelectorAll('video')].filter(v=>v.closest('article[data-testid="tweet"]')===article):[];return media.length===1?media[0].currentTime:null;}
+  if(!watchPage()||videoTarget(url)!==videoTarget(location.href))return null;
+  return videos()[0]?.currentTime??null;
+ }
+ chrome.runtime.onMessage.addListener((m,s,reply)=>{
+  if(m.action==='getNamaPlayback'){reply({seconds:playbackTime(m.url)});return;}
+  if(m.action==='openNamaMenu'){if(!watchPage()&&!playlistPage()){reply({error:'動画またはリストの個別ページを開いてください'});return;}openMenu().then(()=>reply({ok:true}));return true;}
+ });
  document.addEventListener('fullscreenchange',()=>{if(layer)(document.fullscreenElement||document.body).append(layer);schedule();});
  document.addEventListener('yt-navigate-finish',schedule);
  window.addEventListener('hashchange',schedule);

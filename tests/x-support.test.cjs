@@ -5,10 +5,11 @@ const path=require('node:path');
 const vm=require('node:vm');
 const extension=path.join(__dirname,'../extension');
 const sitesSource=fs.readFileSync(path.join(extension,'sites.js'),'utf8');
+const version=JSON.parse(fs.readFileSync(path.join(extension,'manifest.json'),'utf8')).version;
 
 function worker(settings={}) {
  const sent=[],cookieRequests=[],data={...settings};let handler,nativeHandler;
- const port={onMessage:{addListener(fn){nativeHandler=fn;}},onDisconnect:{addListener(){}},postMessage(m){sent.push(m);if(m.action==='hello')queueMicrotask(()=>nativeHandler({type:'hello',version:'1.11.0'}));}};
+ const port={onMessage:{addListener(fn){nativeHandler=fn;}},onDisconnect:{addListener(){}},postMessage(m){sent.push(m);if(m.action==='hello')queueMicrotask(()=>nativeHandler({type:'hello',version}));}};
  const sandbox={URL,setTimeout,clearTimeout,chrome:{
   runtime:{id:'test-id',onMessage:{addListener(fn){handler=fn;}},onStartup:{addListener(){}},connectNative(){return port;}},
   storage:{local:{async get(){return data;},async set(values){Object.assign(data,values);}}},
