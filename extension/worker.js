@@ -12,7 +12,7 @@ function connect(){
   port.onMessage.addListener(m=>{
    if(m.type==='hello'){
     chrome.storage.local.set({hostVersion:m.version});
-    if(!settled){settled=true;clearTimeout(timer);if(m.version==='1.12.0')resolve(port);else fail();}
+    if(!settled){settled=true;clearTimeout(timer);if(m.version==='1.12.1')resolve(port);else fail();}
     return;
    }
    if(m.type==='folderSelected'){

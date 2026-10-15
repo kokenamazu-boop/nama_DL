@@ -35,7 +35,7 @@ globalThis.namaDLEdits={
    <div id="clipFields" class="edit-fields" hidden>
     <div class="edit-row"><label for="clipStart">開始</label><input id="clipStart" type="text" maxlength="24" placeholder="00:00:00" aria-label="開始時刻"><button id="currentStart" type="button">現在位置</button></div>
     <div class="edit-row"><label for="clipEnd">終了</label><input id="clipEnd" type="text" maxlength="24" placeholder="空欄なら末尾" aria-label="終了時刻"><button id="currentEnd" type="button">現在位置</button></div>
-    <small>秒数・分:秒・時:分:秒で指定。小数3桁まで。MP4は指定位置に合わせて再圧縮。WAVは非圧縮で保存。リスト・複数動画は各動画に同じ区間を適用します。</small>
+    <small>秒数・分:秒・時:分:秒で指定。小数3桁まで。指定区間の前後を優先取得。対応できなければ全体取得で再試行します。MP4は指定位置に合わせて再圧縮、WAVは非圧縮で保存。リスト・複数動画は各動画に同じ区間を適用します。</small>
    </div>
   </div><div class="edit-group"><label><input type="checkbox" id="normalizeEnabled"> LUFSで音量をそろえる</label>
    <div id="normalizeFields" class="edit-fields" hidden><div class="edit-row"><label for="targetLUFS">目標</label><input id="targetLUFS" type="number" min="-40" max="-5" step="0.1" value="-15"><span>LUFS</span></div>

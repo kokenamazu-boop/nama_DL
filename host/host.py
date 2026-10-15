@@ -80,6 +80,7 @@ def parse_time(value,optional=False):
 
 def processing_window(data,options):
     if not options['clipEnabled']:return None
+    if data.get('_source_window'):return dict(data['_source_window'])
     duration=float(data.get('format',{}).get('duration') or 0)
     if not math.isfinite(duration) or duration<=0:raise ValueError('動画・音声の長さを確認できないため切り出せません')
     start=options['clipStart'];end=min(options['clipEnd'] if options['clipEnd'] is not None else duration,duration)
@@ -88,7 +89,7 @@ def processing_window(data,options):
 
 def media_input(path,window=None):
     # Transcoding with accurate_seek discards frames/samples before the requested time.
-    return (['-ss',f"{window['start']:.3f}"] if window and window['start'] else [])+['-i',str(path)]
+    return (['-seek_timestamp','1'] if window and window.get('absolute') else [])+(['-ss',f"{window['start']:.3f}"] if window and (window['start'] or window.get('absolute')) else [])+['-i',str(path)]
 
 def window_output(window):
     return ['-t',f"{window['duration']:.3f}"] if window else []
@@ -150,24 +151,70 @@ def processing_summary(window,plan):
             if plan['limited'] and after['i']<plan['target']-.15:parts.append('ピーク上限を優先したため目標LUFS未達（強弱は維持・リミッターなし）')
     return '\n'.join(parts)
 
-def command(url,cookie=None,playlist=False,destination=None,options=None):
+def command(url,cookie=None,playlist=False,destination=None,options=None,partial=False):
     o=options_for(options)
     # Short internal filenames avoid Windows/FFmpeg path limits. Final names use the title.
     template=('%(playlist_id|Playlist).40B/' if playlist else '')+'%(id)s/media_%(format_id).40B.%(ext)s'
+    if partial:template=template.replace('.%(ext)s','.nut')
     args=[str(ROOT/'bin'/'yt-dlp.exe'),'--ignore-config','--no-plugin-dirs','--newline','--encoding','utf-8','--no-color','--windows-filenames','--no-overwrites','--socket-timeout','30','--retries','10','--fragment-retries','10','--concurrent-fragments','4','--fixup','never','--ffmpeg-location',str(ROOT/'bin'),'--js-runtimes','deno:'+str(ROOT/'bin'/'deno.exe'),'-P',str(destination if destination is not None else OUT),'-o',template,'--no-simulate','--no-write-playlist-metafiles']
     fields='id,title,width,height,format_id,uploader,artist,channel,upload_date,description,webpage_url'
+    if partial:fields+=',duration,section_start,section_end'
     args+=['--print','before_dl:VBMETA:%(.{'+fields+'})j']
     if o['media']=='thumbnail':args+=['--skip-download','--write-thumbnail','--ignore-no-formats-error']
     elif o['media']=='audio':args+=['-f','ba/b']
-    else:args+=['-f','bv*,ba/b','--format-sort-force','-S','res,fps,br','--print','before_dl:画質: %(resolution)s / %(format_id)s']
+    else:args+=['-f','bv*+ba/b' if partial else 'bv*,ba/b','--format-sort-force','-S','res,fps,br','--print','before_dl:画質: %(resolution)s / %(format_id)s']
     if o['media']!='thumbnail':args+=['--print','after_move:VBRESULT:%(.{filepath,'+fields+'})j']
     if o['embedThumbnail']:args+=['--write-thumbnail']
+    if partial:
+        args[args.index('--retries')+1]='2';args[args.index('--fragment-retries')+1]='2'
+        start=max(0,o['clipStart']-3)
+        end=f"{o['clipEnd']+3:.3f}" if o['clipEnd'] is not None else 'inf'
+        args+=['--download-sections',f'*{start:.3f}-{end}','--no-force-keyframes-at-cuts','--downloader-args','ffmpeg_o:-copyts -start_at_zero -avoid_negative_ts disabled -f nut']
+        args+=['--downloader-args','ffmpeg_i:-rw_timeout 15000000']
     if playlist:args+=['--yes-playlist','--no-abort-on-error']
     # X may return several videos in one post. Keep them all, without treating a profile as a playlist.
     elif urlsplit(url).hostname in ('x.com','www.x.com','twitter.com','www.twitter.com'):args+=['--no-playlist','--no-abort-on-error']
     else:args+=['--no-playlist','--playlist-items','1']
     if cookie:args+=['--cookies',str(cookie)]
     return args+['--',url]
+
+def partial_options(source,data,record,options):
+    # The FFmpeg downloader preserves the original, zero-based media timeline.
+    # NUT preserves stream time bases, including sub-millisecond audio timestamps.
+    try:
+        duration=float(record['duration']);section_start=float(record['section_start']);section_end=float(record['section_end'])
+        origin=float(data['format']['start_time'])
+    except (KeyError,TypeError,ValueError):raise ValueError('部分取得したデータの元動画上の時刻を確認できません')
+    if not all(math.isfinite(n) for n in (duration,section_start,section_end,origin)) or duration<=0:raise ValueError('部分取得の時刻情報が不正です')
+    start=options['clipStart'];end=min(options['clipEnd'] if options['clipEnd'] is not None else duration,duration)
+    requested_start=max(0,start-3);requested_end=min(options['clipEnd']+3 if options['clipEnd'] is not None else duration,duration)
+    if start>=end:raise ValueError('開始時刻が動画・音声の末尾以降です')
+    if abs(section_start-requested_start)>.01 or abs(section_end-requested_end)>.1:raise ValueError('部分取得の範囲が指定内容と一致しません')
+    if data['format'].get('format_name')!='nut':raise ValueError('部分取得の時刻保持形式を確認できません')
+    streams={int(s['index']):s for s in data['streams'] if s.get('codec_type') in ('audio','video') and not s.get('disposition',{}).get('attached_pic')}
+    bounds={}
+    def line(text):
+        fields=dict(part.split('=',1) for part in text.split('|') if '=' in part)
+        try:index=int(fields['stream_index']);pts=float(fields['pts_time'])
+        except (KeyError,ValueError):return
+        try:span=float(fields.get('duration_time',0))
+        except ValueError:span=0.0
+        if index not in streams or not math.isfinite(pts) or not math.isfinite(span):return
+        low,high=bounds.get(index,(pts,pts));bounds[index]=(min(low,pts),max(high,pts+span))
+    code=run_process([str(ROOT/'bin'/'ffprobe.exe'),'-v','error','-show_entries','packet=stream_index,pts_time,duration_time','-of','compact=p=0:nk=0',str(source)],line)
+    if code or not streams or set(bounds)!=set(streams):raise ValueError('部分取得した映像・音声の時刻を確認できません')
+    for index,stream in streams.items():
+        low,high=bounds[index]
+        tolerance=.05
+        if stream['codec_type']=='video':
+            from fractions import Fraction
+            try:rate=float(Fraction(stream.get('r_frame_rate') or '0'));tolerance=max(.05,1/rate+.01) if rate>0 else .1
+            except (ValueError,ZeroDivisionError):tolerance=.1
+        if low>start+tolerance or high<end-tolerance:raise ValueError('部分取得したデータに必要な区間が含まれていません')
+    if origin>start+.05:raise ValueError('部分取得したデータの開始時刻を確認できません')
+    window={'start':start,'end':end,'duration':end-start}
+    data['_source_window']={**window,'absolute':True}
+    return options,window
 
 
 def unique_path(path):
@@ -390,10 +437,10 @@ def convert_file(source, progress, output_dir=None, options=None, record=None, a
         return output
     finally:temp.unlink(missing_ok=True)
 
-def convert_audio(source,target,record,options,verified=None):
+def convert_audio(source,target,record,options,verified=None,source_info=None):
     import uuid
     options=options_for(options)
-    window=processing_window(probe(source),options) if options['clipEnabled'] else None
+    window=processing_window(source_info if source_info is not None else probe(source),options) if options['clipEnabled'] else None
     normalization=normalization_plan(source,window,options,lambda text:send('progress',text))
     output=unique_path(target/(title_name(record.get('title') or source.stem,target)+'.wav'))
     temp=target/(uuid.uuid4().hex+'.working.wav')
@@ -455,9 +502,9 @@ def inspect_quality(m):
     except Exception as e:result=('error',str(e))
     send(*result)
 
-def download(m):
+def _download_attempt(m,partial=False):
     result=('error','処理が完了しませんでした')
-    stage=None
+    stage=None;published=False
     try:
         import uuid
         u=validate_url(m.get('url'));destination=destination_path(m.get('destination',''))
@@ -486,18 +533,30 @@ def download(m):
                     if len(tail)>8:tail.pop(0)
                     if text.startswith('ERROR:'):download_errors.append(text)
                     send('progress','取得中（取得済み '+str(len(files))+' 件）\n'+'\n'.join(tail))
-            code=run_process(command(m['url'],cookie,playlist,stage,o),line)
+            if partial:send('progress','指定区間の前後だけを取得中…（対応できない場合は全体取得で再試行します）')
+            code=run_process(command(m['url'],cookie,playlist,stage,o,partial=partial),line)
         if o['media']=='thumbnail':
             files=[str(p) for p in sorted(stage.rglob('*')) if p.is_file() and p.suffix.lower() in ('.png','.jpg','.jpeg','.webp')]
             if len(files)<len(item_meta):download_errors.append(f'サムネイルを取得できない項目があります（対象 {len(item_meta)} / 画像取得 {len(files)}）')
         groups={}
         for file in files:groups.setdefault(str(Path(file).parent),[]).append(file)
+        prepared={};pending=[]
+        if partial:
+            if code not in (0,101) or download_errors or not files:raise RuntimeError('部分取得を完了できませんでした。\n'+'\n'.join((download_errors+tail)[-5:]))
+            for directory,group in groups.items():
+                if len(group)!=1:raise ValueError('部分取得した映像・音声を一つの時刻軸で確認できません')
+                source=Path(group[0]).resolve()
+                if not source.is_relative_to(stage.resolve()):raise ValueError('部分取得ファイルの保存場所が一致しません')
+                data=probe(source);info=item_meta.get(source.parent.name) or records.get(group[0]) or {}
+                local_options,source_window=partial_options(source,data,info,o)
+                prepared[directory]=(data,local_options,source_window)
         converted=0;failed=[];deleted=0;quality_results=[];processing_results=[]
         for i,(directory,group) in enumerate(groups.items(),1):
             if cancel.is_set():raise InterruptedError('中止しました')
             source=Path(group[0]).resolve()
             if not source.is_relative_to(stage.resolve()):raise RuntimeError('取得ファイルの保存場所が一致しません')
-            target=destination/source.parent.parent.name if playlist else destination
+            final_target=destination/source.parent.parent.name if playlist else destination
+            target=stage/'ready'/str(i) if partial else final_target
             target.mkdir(parents=True,exist_ok=True)
             prefix=f'保存処理 {i}/{len(groups)}\n'
             info=item_meta.get(source.parent.name) or records.get(group[0]) or {'title':source.stem,'id':source.parent.name}
@@ -509,11 +568,12 @@ def download(m):
                     if not any(x.get('codec_name')=='png' for x in checked['streams']):raise RuntimeError('PNG画像の確認に失敗しました')
                     png.rename(output)
                 else:
-                    inputs=[(Path(file).resolve(),probe(Path(file))) for file in group]
+                    inputs=[(source,prepared[directory][0])] if partial else [(Path(file).resolve(),probe(Path(file))) for file in group]
+                    local_options=prepared[directory][1] if partial else o
                     if o['media']=='audio':
                         source=next((path for path,data in inputs if any(x.get('codec_type')=='audio' for x in data['streams'])),None)
                         if source is None:raise RuntimeError('音声トラックを取得できませんでした')
-                        output=convert_audio(source,target,info,o,verified=checked)
+                        output=convert_audio(source,target,info,local_options,verified=checked,source_info=inputs[0][1] if partial else None)
                     else:
                         videos=[(path,data) for path,data in inputs if any(x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic') for x in data['streams'])]
                         if not videos:raise RuntimeError('映像トラックを取得できませんでした')
@@ -523,9 +583,15 @@ def download(m):
                         v=next(x for x in data['streams'] if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic'))
                         info={**info,'width':v.get('width'),'height':v.get('height'),'format_id':'+'.join(str(records.get(file,{}).get('format_id') or Path(file).stem) for file in group)}
                         send('progress',prefix+quality_summary(info))
-                        output=convert_file(source,lambda t:send('progress',prefix+t),target,o,info,audio,source_info=data,audio_info=audio_pair[1] if audio_pair else None,verified=checked)
+                        output=convert_file(source,lambda t:send('progress',prefix+t),target,local_options,info,audio,source_info=data,audio_info=audio_pair[1] if audio_pair else None,verified=checked)
                         video=next((x for x in checked['streams'] if x.get('codec_type')=='video' and not x.get('disposition',{}).get('attached_pic')),{})
                         quality_results.append(str(info.get('id'))+': 取得 '+str(info.get('width'))+'×'+str(info.get('height'))+' → MP4 '+str(video.get('width'))+'×'+str(video.get('height'))+' / '+checked['save_mode'])
+                if partial:
+                    window=prepared[directory][2]
+                    details=checked.get('processing','').split('\n')
+                    if details and details[0].startswith('切り出し:'):details[0]=processing_summary(window,None)
+                    checked['processing']='\n'.join(details)+'\n取得方式: 部分取得 → 指定位置で切り出し'
+                    pending.append((output,final_target,info.get('title') or source.stem))
                 if checked.get('processing'):processing_results.append(str(info.get('title') or info.get('id'))+'\n'+checked['processing'])
                 converted+=1
                 deleted+=sum(1 for file in group if Path(file).suffix.lower()=='.mkv' and not Path(file).exists())
@@ -542,7 +608,16 @@ def download(m):
         if failed or download_errors or code not in (0,101):
             result=('error','一部または全部の処理に失敗しました。\n'+text+'\n'+'\n'.join((download_errors+failed+tail)[-12:])+'\n途中ファイル: '+str(stage))
         elif not files:result=('error','取得ファイルがありません。URLを確認してください。\n'+'\n'.join(tail))
-        else:result=('done','完了\n'+text)
+        else:
+            if partial:
+                # Do not publish any partial-attempt output before ALL items verify.
+                # This makes a whole-download retry safe even for playlists.
+                for output,final_target,title in pending:
+                    if cancel.is_set():raise InterruptedError('中止しました')
+                    final_target.mkdir(parents=True,exist_ok=True)
+                    final_output=unique_path(final_target/(title_name(title,final_target)+output.suffix))
+                    output.rename(final_output);published=True
+            result=('done','完了\n'+text)
     except InterruptedError:result=('cancelled','中止しました。完了済みファイルは残っています。途中ファイル: '+str(stage))
     except Exception as e:result=('error',str(e))
     finally:
@@ -553,6 +628,23 @@ def download(m):
                 except OSError:pass
             try:stage.rmdir();stage.parent.rmdir()
             except OSError:pass
+    return result,stage,published
+
+def download(m):
+    try:partial=options_for(m.get('options'))['clipEnabled']
+    except Exception as e:send('error',str(e));return
+    result,stage,published=_download_attempt(m,partial=partial)
+    if partial and result[0]=='error' and not published and not cancel.is_set():
+        send('progress','部分取得を確認できなかったため、全体取得で再試行します。\n'+result[1].split('\n')[0])
+        first_stage=stage
+        result,stage,_=_download_attempt(m)
+        if result[0]=='done':
+            if first_stage and first_stage.exists():
+                import shutil
+                try:shutil.rmtree(first_stage);first_stage.parent.rmdir()
+                except OSError:pass
+            result=(result[0],result[1]+'\n取得方式: 全体取得（部分取得に対応できなかったため）')
+        elif first_stage and first_stage.exists():result=(result[0],result[1]+'\n部分取得の途中ファイル: '+str(first_stage))
     send(*result)
 
 def choose_folder(initial):
@@ -576,7 +668,7 @@ def main():
             size=struct.unpack('<I',read_exact(4))[0]
             if size>2*1024*1024:break
             m=json.loads(read_exact(size))
-            if m.get('action')=='hello':send('hello','',version='1.12.0')
+            if m.get('action')=='hello':send('hello','',version='1.12.1')
             elif m.get('action')=='chooseFolder':
                 if picker and picker.is_alive():send('folderNotice','フォルダー選択画面はすでに開いています。')
                 else:
