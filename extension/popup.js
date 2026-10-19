@@ -1,4 +1,5 @@
-let tab;
+let tab,submitting=false;
+const queueView=namaDLQueueUI.mount(document,m=>chrome.runtime.sendMessage(m));
 const $=id=>document.getElementById(id);
 function isNico(url){try{const h=new URL(url).hostname;return h==='nicovideo.jp'||h.endsWith('.nicovideo.jp');}catch{return false;}}
 function listPage(url){try{const u=new URL(url);return isNico(url)?(/^\/(?:user\/\d+\/|my\/)?mylist\/\d+\/?$/.test(u.pathname)||(/^\/(?:my\/)?mylist\/?$/.test(u.pathname)&&/^#\/\d+(?:[/?]|$)/.test(u.hash))):u.hostname.endsWith('youtube.com')&&u.pathname==='/playlist'&&u.searchParams.has('list');}catch{return false;}}
@@ -7,21 +8,21 @@ function authKey(url){return isNico(url)?'nicovideo.jp':namaDLSites.authKey(url)
 function editURL(){return isX(tab?.url)?namaDLSites.xPostURL(tab.url)||tab.url:tab?.url;}
 function readOptions(validate=false){return {media:document.querySelector('input[name=media]:checked').value,embedThumbnail:$('embedThumbnail').checked,embedMetadata:$('embedMetadata').checked,...namaDLEdits.read(document,editURL(),validate)};}
 function modeUI(){const o=readOptions();namaDLEdits.update(document,o.media);$('embedThumbnail').disabled=o.media!=='video';$('embedMetadata').disabled=o.media==='thumbnail';for(const card of document.querySelectorAll('.choice'))card.classList.toggle('selected',card.querySelector('input').checked);$('modeNote').textContent=o.media==='audio'?'WAV（24bit PCM）。サムネイル埋め込みは動画のみ対応。':o.media==='thumbnail'?'動画・音声を取得せず、PNG画像だけを保存します。':'';}
-async function refresh(){const s=await chrome.storage.local.get(['status','destination','folderMessage','hostVersion']);$('status').textContent=s.status?.text||'待機中';const busy=!!s.status?.busy;$('start').disabled=busy||!/^https?:/.test(tab?.url||'');$('inspect').disabled=busy||!/^https?:/.test(tab?.url||'');$('cancel').hidden=!busy;$('destination').textContent=s.destination||'ビデオ / VideoButton';$('destination').title=$('destination').textContent;$('settingMessage').textContent=s.folderMessage||'';$('version').textContent='拡張機能 1.12.1 / PC側 '+(s.hostVersion||'未確認');}
-async function submit(action){try{
+async function refresh(){const s=await chrome.storage.local.get(['status','destination','folderMessage','hostVersion','downloadQueue']);$('status').textContent=s.status?.text||'待機中';const busy=!!s.status?.busy;$('start').disabled=submitting||!/^https?:/.test(tab?.url||'');queueView.render(s.downloadQueue,s.status);$('inspect').disabled=busy||!/^https?:/.test(tab?.url||'');$('cancel').hidden=!busy;$('destination').textContent=s.destination||'ビデオ / VideoButton';$('destination').title=$('destination').textContent;$('settingMessage').textContent=s.folderMessage||'';$('version').textContent='拡張機能 1.13.0 / PC側 '+(s.hostVersion||'未確認');}
+async function submit(action){if(submitting)return;submitting=true;$('start').disabled=true;try{
  const options=readOptions(action==='download');
  const x=isX(tab.url),url=x?namaDLSites.xPostURL(tab.url):tab.url;
  if(x&&!url)throw Error('動画付き投稿のダウンロードボタンを押すか、投稿の個別ページを開いてください。');
- let cookies=[];
+ let storeId;
  if($('auth').checked){
   const nico=isNico(tab.url),origin=nico?'https://*.nicovideo.jp/*':x?'https://*.x.com/*':new URL(tab.url).origin+'/*';
   if(!await chrome.permissions.request({origins:[origin]}))throw Error('ログイン情報へのアクセスが許可されませんでした');
   const stores=await chrome.cookies.getAllCookieStores(),store=stores.find(s=>s.tabIds.includes(tab.id));
-  cookies=await chrome.cookies.getAll({...(nico?{domain:'nicovideo.jp'}:x?{domain:'x.com'}:{url:tab.url}),...(store?{storeId:store.id}:{})});
-  if(nico&&!cookies.some(c=>c.name==='user_session'&&c.value)&&readOptions().media!=='thumbnail')throw Error('ニコニコへログインし直してください。ログインCookieが見つかりません。');
+  if(!store)throw Error('ブラウザーのプロファイルを確認できません。ページを開き直してください。');
+  storeId=store.id;
  }
- const r=await chrome.runtime.sendMessage({action,url,cookies,playlist:x||action==='inspect'?false:(listPage(tab.url)||$('playlist').checked),options});if(r?.error)throw Error(r.error);
-}catch(e){$('status').textContent=e.message;}}
+ const r=await chrome.runtime.sendMessage({action,url,title:tab.title,auth:{enabled:$('auth').checked,storeId},playlist:x||action==='inspect'?false:(listPage(tab.url)||$('playlist').checked),options});if(r?.error)throw Error(r.error);if(action==='download')queueView.added(r?.duplicate);
+}catch(e){await refresh();$('status').textContent=e.message;}finally{submitting=false;$('start').disabled=!/^https?:/.test(tab?.url||'');}}
 $('id').textContent=chrome.runtime.id;
 $('close').onclick=()=>window.close();$('start').onclick=()=>submit('download');$('inspect').onclick=()=>submit('inspect');$('cancel').onclick=()=>chrome.runtime.sendMessage({action:'cancel'});$('folder').onclick=()=>chrome.runtime.sendMessage({action:'folder'});
 $('chooseFolder').onclick=async()=>{const r=await chrome.runtime.sendMessage({action:'chooseFolder'});if(r?.error)$('status').textContent=r.error;};

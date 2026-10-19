@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "nama_DL",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "開いている動画・音声・サムネイルを保存するダウンローダー",
   "permissions": [
     "activeTab",
@@ -53,6 +53,7 @@
       "js": [
         "sites.js",
         "edit-options.js",
+        "queue-ui.js",
         "page.js"
       ],
       "run_at": "document_idle"

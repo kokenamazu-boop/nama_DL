@@ -9,8 +9,15 @@ proc=None
 cancel=threading.Event()
 worker=None
 picker=None
+message_context=threading.local()
+job_ready=threading.Event()
+job_ready.set()
 
 def send(kind,text,**extra):
+    if getattr(message_context,'capture',False) and kind in ('done','error','cancelled'):
+        message_context.terminal=(kind,text,extra);return
+    job_id=getattr(message_context,'job_id',None)
+    if job_id:extra={'jobId':job_id,**extra}
     data=json.dumps({'type':kind,'text':text,**extra},ensure_ascii=False).encode('utf-8')
     with lock:
         sys.stdout.buffer.write(struct.pack('<I',len(data))+data);sys.stdout.buffer.flush()
@@ -658,8 +665,26 @@ def choose_folder(initial):
         else:send('folderNotice','フォルダー選択をキャンセルしました。保存先は変更していません。')
     except Exception as e:send('folderNotice',str(e))
 
+def run_job(m):
+    # Buffer the terminal message until processing and cleanup have returned.
+    # The main reader joins this finished worker before accepting the next job.
+    message_context.job_id=m.get('jobId')
+    message_context.capture=True
+    message_context.terminal=None
+    try:
+        (inspect_quality if m.get('action')=='inspect' else download)(m)
+    except Exception as e:
+        message_context.terminal=('error',str(e),{})
+    finally:
+        message_context.capture=False
+        job_ready.set()
+        kind,text,extra=message_context.terminal or ('error','処理結果を確認できませんでした',{})
+        send(kind,text,**extra)
+
+
 def main():
     global worker,picker
+    worker_job=None
     if os.name=='nt':
         import msvcrt
         msvcrt.setmode(sys.stdin.fileno(),os.O_BINARY);msvcrt.setmode(sys.stdout.fileno(),os.O_BINARY)
@@ -668,15 +693,19 @@ def main():
             size=struct.unpack('<I',read_exact(4))[0]
             if size>2*1024*1024:break
             m=json.loads(read_exact(size))
-            if m.get('action')=='hello':send('hello','',version='1.12.1')
+            if m.get('action')=='hello':send('hello','',version='1.13.0')
             elif m.get('action')=='chooseFolder':
                 if picker and picker.is_alive():send('folderNotice','フォルダー選択画面はすでに開いています。')
                 else:
                     picker=threading.Thread(target=choose_folder,args=(m.get('destination',''),),daemon=True);picker.start()
             elif m.get('action') in ('download','inspect'):
-                if worker and worker.is_alive():send('progress','ダウンロード中です');continue
-                cancel.clear();worker=threading.Thread(target=inspect_quality if m.get('action')=='inspect' else download,args=(m,));worker.start()
-            elif m.get('action')=='cancel':stop()
+                if worker and worker.is_alive():
+                    if not job_ready.is_set():send('error','別の処理を実行中です',jobId=m.get('jobId'));continue
+                    worker.join()
+                cancel.clear();job_ready.clear();worker_job=m.get('jobId')
+                worker=threading.Thread(target=run_job,args=(m,));worker.start()
+            elif m.get('action')=='cancel':
+                if not m.get('jobId') or m.get('jobId')==worker_job:stop()
             elif m.get('action')=='folder':
                 try:os.startfile(destination_path(m.get('destination','')))
                 except Exception as e:send('notice','保存先を開けません: '+str(e))

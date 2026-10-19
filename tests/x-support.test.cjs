@@ -1,25 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('node:vm');
-const extension=path.join(__dirname,'../extension');
-const sitesSource=fs.readFileSync(path.join(extension,'sites.js'),'utf8');
-const version=JSON.parse(fs.readFileSync(path.join(extension,'manifest.json'),'utf8')).version;
-
-function worker(settings={}) {
- const sent=[],cookieRequests=[],data={...settings};let handler,nativeHandler;
- const port={onMessage:{addListener(fn){nativeHandler=fn;}},onDisconnect:{addListener(){}},postMessage(m){sent.push(m);if(m.action==='hello')queueMicrotask(()=>nativeHandler({type:'hello',version}));}};
- const sandbox={URL,setTimeout,clearTimeout,chrome:{
-  runtime:{id:'test-id',onMessage:{addListener(fn){handler=fn;}},onStartup:{addListener(){}},connectNative(){return port;}},
-  storage:{local:{async get(){return data;},async set(values){Object.assign(data,values);}}},
-  cookies:{async getAllCookieStores(){return [{id:'profile-2',tabIds:[7]}];},async getAll(query){cookieRequests.push(query);return [{domain:'.x.com',name:'auth_token',value:'test'}];}}
- }};
- const context=vm.createContext(sandbox);
- sandbox.importScripts=()=>vm.runInContext(sitesSource,context);
- vm.runInContext(fs.readFileSync(path.join(extension,'worker.js'),'utf8'),context);
- return {sent,cookieRequests,sites:context.namaDLSites,send(m,url){return new Promise(resolve=>handler(m,{id:'test-id',tab:{id:7,url}},resolve));}};
-}
+const {worker}=require('./worker-harness.cjs');
 
 test('X post URLs normalize only supported HTTPS post links',()=>{
  const {sites}=worker();

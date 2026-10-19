@@ -251,15 +251,16 @@
   }
  }
  function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(ensureButton);}}
+ let queueView=null,submitting=false;
  async function settingsChanged(){
   if(!root)return;
   try{
-   const data=await chrome.storage.local.get(['destination','folderMessage','status']);
+   const data=await chrome.storage.local.get(['destination','folderMessage','status','downloadQueue']);
    if(!root)return;
    $('destination').textContent=data.destination||'ビデオ / VideoButton';
    $('folderMessage').textContent=data.folderMessage||'';
    $('status').textContent=data.status?.text||'待機中';
-   $('start').disabled=!!data.status?.busy;
+   $('start').disabled=submitting;queueView?.render(data.downloadQueue,data.status);
    $('inspect').disabled=!!data.status?.busy;
    $('cancel').hidden=!data.status?.busy;
   }catch{if(root)$('status').textContent='拡張機能を更新した場合は、この動画ページを再読み込みしてください。';}
@@ -274,11 +275,14 @@
  async function saveOptions(){modeUI();await chrome.storage.local.set({options:selectedOptions()});}
  async function request(action,event){
   if(event&&!event.isTrusted)return;
+  if(action==='download'&&submitting)return;
+  if(action==='download'){submitting=true;$('start').disabled=true;}
   try{
    $('status').textContent=action==='chooseFolder'?'フォルダー選択画面を開いています…':'処理を準備中…';
-   const response=await chrome.runtime.sendMessage({action,url:activeContext.url,source:activeContext.source,playlist:action==='inspect'?false:(activeContext.playlist||$('playlist').checked),options:selectedOptions(action==='download')});
+   const response=await chrome.runtime.sendMessage({action,url:activeContext.url,title:activeContext.label,source:activeContext.source,playlist:action==='inspect'?false:(activeContext.playlist||$('playlist').checked),options:selectedOptions(action==='download')});
    if(response?.error)throw Error(response.error);
-  }catch(e){if(root)$('status').textContent=e.message;}
+   if(action==='download'){await settingsChanged();queueView?.added(response?.duplicate);}
+  }catch(e){if(root)$('status').textContent=e.message;}finally{if(action==='download'){submitting=false;if(root)$('start').disabled=false;}}
  }
  async function openMenu(context=pageContext(),focus=buttonRoot?.querySelector('button')){
   if(layer){$('start').focus();return;}
@@ -295,7 +299,7 @@
    details{margin-top:17px;color:#ccc;font-size:13px}summary{cursor:pointer}.checks{display:grid;gap:9px;margin:13px 0}label:has(input:disabled){opacity:.45}
    .folder{margin-top:17px;border-top:1px solid #383838;padding-top:15px;display:flex;gap:10px;align-items:center}.path{min-width:0;flex:1}.path small{display:block;color:#999;font-size:11px}.path span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}.folder button{white-space:nowrap;font-size:12px}
    #folderMessage{font-size:11px;color:#aaa;margin:5px 0 0}#status{font:12px/1.5 system-ui;white-space:pre-wrap;overflow-wrap:anywhere;color:#bbb;max-height:135px;overflow:auto;margin:14px 0 0}
-   footer{display:flex;gap:10px;padding:15px 20px;border-top:1px solid #383838;align-items:center}.primary{margin-left:auto;background:var(--blue);border-color:var(--blue);color:white;font-weight:600;padding:10px 19px}.primary:hover:not(:disabled){background:#2195ff}footer .minor{font-size:12px;padding:7px 9px}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid #55b3ff;outline-offset:3px}
+   footer{display:flex;gap:10px;padding:15px 20px;border-top:1px solid #383838;align-items:center}.primary{margin-left:auto;background:var(--blue);border-color:var(--blue);color:white;font-weight:600;padding:10px 19px}.primary:hover:not(:disabled){background:#2195ff}.dialog footer{position:sticky;bottom:0;background:#1b1b1b;z-index:1}footer .minor{font-size:12px;padding:7px 9px}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid #55b3ff;outline-offset:3px}
   </style><div class="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-label="nama_DL ダウンロード"><header>${icon}<span>nama_DL ダウンロード</span><button class="close" id="close" aria-label="閉じる">×</button></header><main>
   <p id="context" style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 12px"></p><div class="choices" role="radiogroup" aria-label="保存内容">
    <label class="choice"><input name="media" value="video" type="radio" checked><span><strong>動画を保存</strong><small>MP4 · 最高画質 · After Effects用</small></span></label>
@@ -307,8 +311,9 @@
    <label><input type="checkbox" id="auth"> このサイトのログイン情報を使う</label>
    <label><input type="checkbox" id="playlist"> 再生リスト・マイリスト全体を保存</label>
   </div><button id="inspect" type="button">画質を確認</button> <button id="folder" type="button">保存先を開く</button></details>
-  <div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="folderMessage"></p><pre id="status">待機中</pre>
-  </main><footer><button id="cancel" class="minor" hidden>処理を中止</button><button id="start" class="primary">ダウンロード</button></footer></section></div>`;
+  <div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="folderMessage"></p><div id="queue"></div><pre id="status">待機中</pre>
+  </main><footer><button id="cancel" class="minor" hidden>処理を中止</button><button id="start" class="primary">キューに追加</button></footer></section></div>`;
+  queueView=namaDLQueueUI.mount(root,m=>chrome.runtime.sendMessage(m));
   (document.fullscreenElement||document.body).append(layer);
   $('context').textContent=(activeContext.playlist?'リスト全体: ':activeContext.source==='post'?'投稿: ':activeContext.source==='card'?'動画: ':'')+(activeContext.label||'現在の動画');
   $('context').title=$('context').textContent;
