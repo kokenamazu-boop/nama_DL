@@ -2,6 +2,7 @@ import array
 import importlib.util
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -33,7 +34,13 @@ class PartialMediaTests(unittest.TestCase):
         cls.tmp=tempfile.TemporaryDirectory(prefix='nama-partial-test-');cls.root=Path(cls.tmp.name)
         (cls.root/'bin').mkdir();cls.old_root=host.ROOT;host.ROOT=cls.root
         for tool in ('ffmpeg','ffprobe'):
-            for name in (tool,tool+'.exe'):(cls.root/'bin'/name).symlink_to(shutil.which(tool))
+            target=Path(shutil.which(tool))
+            for name in (tool,tool+'.exe'):
+                link=cls.root/'bin'/name
+                try:link.symlink_to(target)
+                except OSError:
+                    try:os.link(target,link)
+                    except OSError:shutil.copy2(target,link)
         cls.source=cls.root/'source.mp4'
         subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30:duration=20','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=20','-c:v','libx264','-preset','fast','-crf','18','-g','120','-c:a','aac','-movflags','+faststart',str(cls.source)],check=True)
 

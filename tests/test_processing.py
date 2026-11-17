@@ -1,6 +1,7 @@
 import array
 import importlib.util
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -57,7 +58,12 @@ class MediaTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory(prefix='nama-DL-processing-test-')
         cls.root = Path(cls.tmp.name)
         (cls.root / 'bin').mkdir()
-        for tool in ('ffmpeg', 'ffprobe'):(cls.root / 'bin' / (tool + '.exe')).symlink_to(shutil.which(tool))
+        for tool in ('ffmpeg', 'ffprobe'):
+            target = Path(shutil.which(tool)); link = cls.root / 'bin' / (tool + '.exe')
+            try:link.symlink_to(target)
+            except OSError:
+                try:os.link(target, link)
+                except OSError:shutil.copy2(target, link)
         cls.old_root = host.ROOT
         host.ROOT = cls.root
         cls.source = cls.root / 'levels.wav'
