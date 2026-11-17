@@ -14,5 +14,5 @@ try {
  }
  & "$dest\bin\yt-dlp.exe" -U
  if ($LASTEXITCODE -ne 0) { Write-Warning 'yt-dlp update failed. Run Update.cmd again before retrying.' }
- Write-Host 'Host updated to v1.14.0. Reload the extension in brave://extensions.' -ForegroundColor Green
+ Write-Host 'Host updated to v1.15.0. Reload the extension in brave://extensions.' -ForegroundColor Green
 } catch { Write-Host $_ -ForegroundColor Red; exit 1 }

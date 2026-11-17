@@ -9,7 +9,9 @@ What it does:
      with extension/manifest.json (fails before building anything).
   2. Checks that the fixed extension ID in Setup.ps1 matches the
      public key embedded in extension/manifest.json.
-  3. Runs the test suites (unless --skip-tests is given).
+  3. Runs the test suites (unless --skip-tests is given) and fails
+     if any test was skipped: a suite that did not really run (for
+     example the media tests without ffmpeg on PATH) must not ship.
   4. Packs ONLY the whitelisted distribution files into
      nama_DL-Windows-v<version>.zip under a top-level nama_DL/ folder,
      then verifies the ZIP contents against the whitelist and writes
@@ -53,6 +55,7 @@ WHITELIST = [
     "extension/edit-options.js",
     "extension/sites.js",
     "extension/report.js",
+    "extension/update-check.js",
     "extension/style.css",
     "extension/icons/nama_DL.png",
     "host/host.py",
@@ -149,12 +152,23 @@ def run_tests():
          "tests.test_processing", "tests.test_partial_download",
          "tests.test_queue_protocol", "tests.test_x_download"],
         ["node", "--test", "tests/queue.test.cjs", "tests/x-support.test.cjs",
-         "tests/report.test.cjs"],
+         "tests/report.test.cjs", "tests/update-check.test.cjs"],
     ]
     for cmd in commands:
         print("+", " ".join(cmd))
-        result = subprocess.run(cmd, cwd=ROOT)
+        result = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+        print(result.stdout, end="")
         if result.returncode != 0:
+            return False
+        # A suite that "passes" with skipped tests did not really run.
+        # The media tests skip themselves when ffmpeg/ffprobe are not on
+        # PATH, which must never silently ship in a distribution build.
+        m = re.search(r"skipped=([0-9]+)", result.stdout)
+        if m and int(m.group(1)) > 0:
+            print(f"Test run had {m.group(1)} SKIPPED test(s). "
+                  "The media tests need ffmpeg and ffprobe on PATH; "
+                  "without them the suite did not really run.")
             return False
     return True
 

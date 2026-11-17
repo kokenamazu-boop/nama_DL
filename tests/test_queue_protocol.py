@@ -46,7 +46,7 @@ class NativeQueueTests(unittest.TestCase):
         data=json.dumps(m).encode();self.process.stdin.write(struct.pack('<I',len(data))+data);self.process.stdin.flush()
     def read(self):return self.messages.get(timeout=5)
     def test_30_immediate_next_jobs_have_no_loss_or_overlapping_cleanup(self):
-        self.send({'action':'hello'});self.assertEqual(self.read()['version'],'1.14.0')
+        self.send({'action':'hello'});self.assertEqual(self.read()['version'],'1.15.0')
         for i in range(30):
             job=str(i);self.send({'action':'download','url':'normal','jobId':job})
             progress=self.read();self.assertEqual((progress['type'],progress['jobId']),('progress',job))

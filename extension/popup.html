@@ -5,6 +5,7 @@
 <header><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><h1>nama_DL ダウンロード</h1><button id="close" aria-label="閉じる">×</button></header>
 <main>
 <p id="title" class="context">現在のページを確認中…</p>
+<p id="updateNotice" class="message" hidden>新しいバージョン <a id="updateLink" href="#" target="_blank" rel="noreferrer">v0.0.0</a> が出ています</p>
 <div class="choices" role="radiogroup" aria-label="保存内容">
 <label class="choice"><input name="media" value="video" type="radio" checked><span><strong>動画を保存</strong><small>MP4 · 最高画質 · After Effects用</small></span></label>
 <label class="choice"><input name="media" value="audio" type="radio"><span><strong>音声のみを保存</strong><small>WAV · 24bit PCM</small></span></label>
@@ -21,12 +22,13 @@
 <div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="settingMessage" class="message"></p>
 <div id="queue"></div>
 <pre id="status">待機中</pre>
-<details class="setup"><summary>初回セットアップ・接続確認</summary><small id="version">拡張機能 1.14.0 / PC側を確認中…</small><small>拡張機能ID（v1.14.0から固定です。通常はSetup.cmdが自動で登録します）</small><code id="id"></code><button id="copyId">IDをコピー</button><small id="copyMessage"></small><button id="copyReport">不具合報告用テキストをコピー</button><small id="reportMessage"></small></details>
+<details class="setup"><summary>初回セットアップ・接続確認</summary><small id="version">拡張機能 1.15.0 / PC側を確認中…</small><small>拡張機能ID（v1.14.0から固定です。通常はSetup.cmdが自動で登録します）</small><code id="id"></code><button id="copyId">IDをコピー</button><small id="copyMessage"></small><button id="copyReport">不具合報告用テキストをコピー</button><small id="reportMessage"></small></details>
 </main>
 <footer><button id="cancel" hidden>処理を中止</button><button id="start" class="primary" disabled>キューに追加</button></footer>
 <script src="sites.js"></script>
 <script src="edit-options.js"></script>
 <script src="queue-ui.js"></script>
 <script src="report.js"></script>
+<script src="update-check.js"></script>
 <script src="popup.js"></script>
 </body></html>

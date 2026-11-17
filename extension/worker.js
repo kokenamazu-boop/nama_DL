@@ -1,5 +1,5 @@
 importScripts('sites.js');
-const VERSION='1.14.0',KEY='downloadQueue',finished=new Set(['done','error','cancelled','interrupted']);
+const VERSION='1.15.0',KEY='downloadQueue',finished=new Set(['done','error','cancelled','interrupted']);
 let port=null,connection=null,queue={jobs:[],paused:false},active=null,inspect=null,activeDestination='',serial=Promise.resolve(),progressTimer=null,pendingProgress=null;
 function connectionError(reason){return /not found|specified native messaging host/i.test(reason||'')?'初回セットアップが必要です。「初回セットアップ・接続確認」からIDをコピーしてSetup.cmdを実行してください。':'PC側へ接続できません。CheckSetup.cmdを実行し、必要ならApplyUpdate.cmdで更新してください。'+(reason?'\n'+reason:'');}
 function transaction(fn){const result=serial.then(()=>ready).then(fn);serial=result.catch(()=>{});return result;}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "nama_DL",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAhc65wO4z16QgVDapauiEDIuKiGExnNWg70GMOMByUw6LLwaEttJERczYBVdg0Az713s18nKvHSdiWNudANmDKZ3EKHeLNOe3iqRssVeXBhchq27tAefWcqEgHV2BydrAjHijWwwfCn31OkSalHwlGa4YfZoFAV9nF/6VR2oAVhH72UHFvIMNodTCBAtXHuSvDDx+Q3Mp/NkdQ9BYnWWpK4c8dNULeRhmzDY8tDO2uaGX8iuMicn5NNzk6t69HYbT9qPR7cpZ0erAiPTHEqbDgvioh18CzwX0Y0FjCY4X8AzdFJJ1J5R7IifJ+fSELT+szRdMMX7dYzGk9R5o2KyZSwIDAQAB",
   "description": "開いている動画・音声・サムネイルを保存するダウンローダー",
   "permissions": [
@@ -39,7 +39,8 @@
     "https://*.youtube.com/*",
     "https://youtu.be/*",
     "https://*.x.com/*",
-    "https://*.twitter.com/*"
+    "https://*.twitter.com/*",
+    "https://api.github.com/*"
   ],
   "content_scripts": [
     {
