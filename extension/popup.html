@@ -21,11 +21,12 @@
 <div class="folder"><div class="path"><small>保存先</small><span id="destination"></span></div><button id="chooseFolder">変更</button></div><p id="settingMessage" class="message"></p>
 <div id="queue"></div>
 <pre id="status">待機中</pre>
-<details class="setup"><summary>初回セットアップ・接続確認</summary><small id="version">拡張機能 1.13.0 / PC側を確認中…</small><small>Setup.cmdに入力する拡張機能ID</small><code id="id"></code><button id="copyId">IDをコピー</button><small id="copyMessage"></small></details>
+<details class="setup"><summary>初回セットアップ・接続確認</summary><small id="version">拡張機能 1.14.0 / PC側を確認中…</small><small>拡張機能ID（v1.14.0から固定です。通常はSetup.cmdが自動で登録します）</small><code id="id"></code><button id="copyId">IDをコピー</button><small id="copyMessage"></small><button id="copyReport">不具合報告用テキストをコピー</button><small id="reportMessage"></small></details>
 </main>
 <footer><button id="cancel" hidden>処理を中止</button><button id="start" class="primary" disabled>キューに追加</button></footer>
 <script src="sites.js"></script>
 <script src="edit-options.js"></script>
 <script src="queue-ui.js"></script>
+<script src="report.js"></script>
 <script src="popup.js"></script>
 </body></html>

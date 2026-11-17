@@ -693,7 +693,7 @@ def main():
             size=struct.unpack('<I',read_exact(4))[0]
             if size>2*1024*1024:break
             m=json.loads(read_exact(size))
-            if m.get('action')=='hello':send('hello','',version='1.13.0')
+            if m.get('action')=='hello':send('hello','',version='1.14.0')
             elif m.get('action')=='chooseFolder':
                 if picker and picker.is_alive():send('folderNotice','フォルダー選択画面はすでに開いています。')
                 else:

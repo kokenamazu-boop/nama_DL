@@ -7,7 +7,7 @@ async function stub(page){
  await page.addInitScript(()=>{
   const listeners=[],runtimeListeners=[];window.testSent=[];
   const make=(id,state,media='video')=>({id,url:`https://www.youtube.com/watch?v=abcdefghij${id}`,title:id==='1'?'テスト動画 <img src=x onerror=alert(1)>':'待機中の動画 '+id,state,text:'動画を取得中… 50%',options:{media,clipEnabled:true,clipStart:'00:20',clipEnd:'00:40',normalizeEnabled:true,targetLUFS:'-15'},destination:'D:\\音MAD\\素材',auth:{enabled:false},playlist:false});
-  window.testData={status:{text:'動画を取得中… 50%',busy:true},destination:'D:\\音MAD\\素材',hostVersion:'1.13.0',downloadQueue:{jobs:[make('1','active'),make('2','waiting','audio'),make('3','error')],paused:false}};
+  window.testData={status:{text:'動画を取得中… 50%',busy:true},destination:'D:\\音MAD\\素材',hostVersion:'1.14.0',downloadQueue:{jobs:[make('1','active'),make('2','waiting','audio'),make('3','error')],paused:false}};
   window.chrome={
    storage:{local:{async get(){return structuredClone(window.testData);},async set(value){Object.assign(window.testData,structuredClone(value));for(const fn of listeners)await fn();}},onChanged:{addListener(fn){listeners.push(fn);}}},
    runtime:{id:'test-extension',onMessage:{addListener(fn){runtimeListeners.push(fn);}},async sendMessage(m){

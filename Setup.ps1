@@ -2,7 +2,9 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 try {
  if (-not [Environment]::Is64BitOperatingSystem) { throw 'Windows x64 is required.' }
- $extensionId = (Read-Host 'nama_DLの拡張機能ID（32文字）を貼り付けてEnter').Trim()
+ $fixedExtensionId = 'ngakcifeaboajdppldnpgngofjblpnfk'
+ $extensionId = (Read-Host 'そのままEnterで固定IDを登録します。旧版のIDを使う場合だけ、ID（32文字）を貼り付けてEnter').Trim()
+ if ($extensionId -eq '') { $extensionId = $fixedExtensionId }
  if ($extensionId -cnotmatch '^[a-p]{32}$') { throw 'IDが正しくありません。nama_DLの初回セットアップ欄からIDをコピーしてください。' }
  $dest = Join-Path $env:LOCALAPPDATA 'VideoButton'
  $bin = Join-Path $dest 'bin'

@@ -4,13 +4,13 @@
 
 YouTube・ニコニコ動画の一覧やプレイヤー、X（Twitter）の投稿から、動画・音声・サムネイルを保存するWindows向けブラウザー拡張機能です。
 
-**現在のバージョン：1.13.0** · Windows 10/11 x64 · Brave / Google Chrome
+**現在のバージョン：1.14.0** · Windows 10/11 x64 · Brave / Google Chrome
 
 ## ダウンロード
 
-[配布用ZIPをダウンロード](https://github.com/kokenamazu-boop/nama_DL/raw/refs/heads/main/downloads/nama_DL-Windows-v1.13.0.zip)
+[配布用ZIPをダウンロード](https://github.com/kokenamazu-boop/nama_DL/releases/download/v1.14.0/nama_DL-Windows-v1.14.0.zip)
 
-上のリンクから **`nama_DL-Windows-v1.13.0.zip`** を保存し、「すべて展開」したフォルダーの **`START_HERE.html`** を開いてください。
+上のリンクから **`nama_DL-Windows-v1.14.0.zip`** を保存し、「すべて展開」したフォルダーの **`START_HERE.html`** を開いてください。配布はGitHub Releasesで行います。同じリリースページにある **`nama_DL-Windows-v1.14.0.zip.sha256.txt`** がZIPのSHA-256です（確認方法は「警告が出たとき」参照）。旧バージョンは [Releasesの一覧](https://github.com/kokenamazu-boop/nama_DL/releases) から取得できます。
 
 ## 主な機能
 
@@ -36,9 +36,8 @@ YouTube・ニコニコ動画の一覧やプレイヤー、X（Twitter）の投�
 1. 配布用ZIPを右クリックして「すべて展開」。移動しない場所に置きます。
 2. Braveは `brave://extensions`、Chromeは `chrome://extensions` を開きます。
 3. デベロッパーモードをONにし、「パッケージ化されていない拡張機能を読み込む」から `extension` フォルダーを選びます。
-4. ツールバーのnama_DLを開き、「初回セットアップ・接続確認」→「IDをコピー」。
-5. `Setup.cmd` を実行し、IDを貼り付けてEnter。
-6. セットアップ完了後、拡張機能とPC側が両方 `1.13.0` であることを確認し、対象サイトを再読み込みします。
+4. `Setup.cmd` を実行し、そのままEnterを押します。v1.14.0から拡張機能IDは固定（全員共通）で、自動で登録されます。IDのコピーは要りません。
+5. セットアップ完了後、拡張機能とPC側が両方 `1.14.0` であることを確認し、対象サイトを再読み込みします。
 
 Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自動取得します。初回はインターネット接続と数百MBの空き容量が必要です。管理者権限や別途Pythonの導入は不要です。
 
@@ -77,6 +76,16 @@ Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自
 
 処理が終わってから拡張機能をOFFにし、以前のフォルダーへ新しい内容を上書きします。`ApplyUpdate.cmd` を実行して、拡張機能をON・再読み込みし、サイトもF5で再読み込みします。以前のフォルダーの場所は変えないでください。
 
+v1.13.0以前から更新する場合は、拡張機能IDが固定IDへ変わります。`ApplyUpdate.cmd` がPC側の登録も自動で固定IDへ書き換えるので、Setupのやり直しは要りません。
+
+## 警告が出たとき
+
+nama_DLは署名のない個人配布のソフトなので、ダウンロード時や初回実行時に警告が出ることがあります。慌てて止めず、まず配布元がこのリポジトリのReleasesかどうかを確認してください。
+
+- ZIPのダウンロードで警告が出た場合：配布元が公式Releasesなら、そのまま保存して構いません。心配な場合は、ZIPと同じフォルダーでPowerShellを開き、`Get-FileHash .\nama_DL-Windows-v1.14.0.zip -Algorithm SHA256` の結果が、リリースページの `.sha256.txt` の値と一致するか確認してください。
+- `Setup.cmd` 実行時に「WindowsによってPCが保護されました」と出た場合：**「詳細情報」→「実行」** の順に押すと進めます。これは署名のない実行ファイルへの標準の警告です。
+- ウイルス対策ソフトが yt-dlp.exe 等を検査する場合があります。セットアップで取得する依存ソフトは、各配布元の公式サイトからのみ取得します。このリポジトリのReleases以外で配られたものは使わないでください。
+
 ## 困ったとき
 
 - 接続・必要ソフトの確認：`CheckSetup.cmd`
@@ -89,7 +98,7 @@ Python専用版・yt-dlp・FFmpeg・FFprobe・Denoはセットアップ時に自
 不具合報告、機能追加等の要望は質問箱まで
 https://note.com/qa/namanamanamazun
 
-不具合の報告には、バージョン、対象の動画／リストのURL、表示されたエラー、使用ブラウザーを添えてください。ログに個人の保存先がある場合は、ユーザー名を伏せてください。
+不具合の報告には、バージョン、対象の動画／リストのURL、表示されたエラー、使用ブラウザーを添えてください。ポップアップの「初回セットアップ・接続確認」にある **「不具合報告用テキストをコピー」** を使うと、それらをまとめてコピーできます。保存先パスのユーザー名は自動で `***` に置き換わり、Cookieやアカウント情報は含まれません。
 
 ## 保存形式・データの扱い
 
@@ -102,6 +111,7 @@ https://note.com/qa/namanamanamazun
 - `extension/`：Manifest V3拡張機能
 - `host/`：PythonのNative Messaging連携、Windowsフォルダー選択
 - `.cmd` / `.ps1`：セットアップ・更新・確認等の補助ツール
+- `tools/package.py` / `Package.cmd`：配布用ZIPの作成（開発用。バージョン表記の照合とテストを通してから、収録ファイル一覧どおりに梱包し、SHA-256を出力します。配布ZIPには含まれません）
 
 依存ソフトは配布ZIPに同梱せず、セットアップで各配布元から取得します。
 
